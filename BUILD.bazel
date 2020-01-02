@@ -1,0 +1,73 @@
+load("@io_bazel_rules_docker//container:container.bzl", "container_image", "container_layer")
+load("@io_bazel_rules_docker//docker/util:run.bzl", "container_run_and_commit")
+load("@io_bazel_rules_docker//docker/package_managers:download_pkgs.bzl", "download_pkgs")
+load("@io_bazel_rules_docker//docker/package_managers:install_pkgs.bzl", "install_pkgs")
+
+download_pkgs(
+    name = "yocto_pkgs",
+    image_tar = "@ubuntu1804//image",
+    packages = [
+        "gawk",
+        "diffstat",
+        "chrpath",
+        "texinfo",
+        "wget",
+        "git-core",
+        "ca-certificates",
+        "build-essential",
+        "python",
+        "python3",
+        "cpio",
+        "file",
+        "locales",
+    ],
+)
+
+install_pkgs(
+    name = "yocto_pkgs_image",
+    image_tar = "@ubuntu1804//image",
+    installables_tar = ":yocto_pkgs.tar",
+    installation_cleanup_commands = "locale-gen en_US.UTF-8 && rm -rf /var/lib/apt/lists/*",
+    output_image_name = "yocto_pkgs_image",
+)
+
+container_layer(
+    name = "yocto_poky_layer",
+    tars = ["@poky//:poky"],
+)
+
+container_layer(
+    name = "yocto_meta_intel_layer",
+    tars = ["@meta_intel//:meta-intel"],
+    directory = "/poky",
+)
+
+container_image(
+    name = "yocto_source_setup",
+    base = ":yocto_pkgs_image",
+    directory = "/poky",
+    files = [":build"],
+    env = {
+        "LANG": "en_US.UTF-8",
+        "BBPATH": "/poky/build",
+        "BUILDDIR": "/poky/build",
+        "PATH": "/poky/scripts:/poky/bitbake/bin:$$PATH",
+    },
+    workdir = "/poky/build",
+    layers = [
+        ":yocto_poky_layer",
+        ":yocto_meta_intel_layer",
+    ],
+)
+
+container_run_and_commit(
+    name = "yocto_bitbake",
+    commands = [
+        "ls /poky/build/sstate-cache",
+        "bitbake core-image-sato",
+    ],
+    docker_run_flags = [
+        "-v sstate-cache:/poky/build/sstate-cache"
+    ],
+    image = ":yocto_source_setup.tar",
+)
